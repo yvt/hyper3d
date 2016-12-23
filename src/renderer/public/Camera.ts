@@ -38,11 +38,11 @@ export class StereoCamera extends three.Camera
         this.leftCamera.near = this.near;
         this.leftCamera.far = this.far;
         this.leftCamera.fov = this.fov;
-        this.leftCamera.aspect = this.aspect * 0.5;
+        this.leftCamera.aspect = this.aspect;
         this.rightCamera.near = this.near;
         this.rightCamera.far = this.far;
         this.rightCamera.fov = this.fov;
-        this.rightCamera.aspect = this.aspect * 0.5;
+        this.rightCamera.aspect = this.aspect;
         this.leftCamera.updateProjectionMatrix();
         this.rightCamera.updateProjectionMatrix();
     }

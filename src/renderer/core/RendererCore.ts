@@ -429,12 +429,15 @@ export class RendererCore
         }
 
         if (outputs.length === 1) {
-            let visualized = this.bufferVisualizer.setupColorVisualizer(outputs[0], ops);
-            output = visualized;
+            output = this.bufferVisualizer.setupColorVisualizer(outputs[0], ops);
         } else if (outputs.length === 2) {
-            let visualized = this.bufferVisualizer.setupSeparateStereoColorVisualizer(
-                outputs[0], outputs[1], ops);
-            output = visualized;
+            if (this.params.useStereoRendering === "anaglyph") {
+                output = this.bufferVisualizer.setupAnaglyphStereoColorVisualizer(
+                    outputs[0], outputs[1], ops);
+            } else {
+                output = this.bufferVisualizer.setupSeparateStereoColorVisualizer(
+                    outputs[0], outputs[1], ops);
+            }
         }
 
         const logger = this.log.getLogger("pipeline");
@@ -556,7 +559,9 @@ export class RendererCore
 
         this.renderWidth = this.width = width;
         this.renderHeight = this.height = height;
-        this.renderWidth = (width / (this.params.useStereoRendering ? 2 : 1)) | 0;
+        if (this.params.useStereoRendering !== "anaglyph") {
+            this.renderWidth = (width / 2) | 0;
+        }
 
         // global uniform values
         this.updateGlobalUniforms();

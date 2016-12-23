@@ -19,7 +19,7 @@ export interface WebGLHyperRendererCreationParameters
     useFullResolutionGBuffer?: boolean;
     useFPBuffer?: boolean;
     log?: WebGLHyperRendererLogParameters | boolean;
-    useStereoRendering?: boolean;
+    useStereoRendering?: string;
 }
 
 export interface WebGLHyperRendererParameters
