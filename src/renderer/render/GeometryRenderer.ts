@@ -1,6 +1,8 @@
 /// <reference path="../Prefix.d.ts" />
 /// <reference path="../gl/WEBGLDrawBuffers.d.ts" />
 
+import * as three from "three";
+
 import {
     DepthTextureRenderBufferInfo,
     GBuffer0TextureRenderBufferInfo,
@@ -46,6 +48,10 @@ import {
     GLProgramAttributes
 } from "../core/GLProgram";
 
+import { CropFilterRenderer } from "../postfx/CropFilter";
+
+import { Matrix4Pool } from "../utils/ObjectPool";
+
 export interface GeometryPassOutput
 {
     g0: GBuffer0TextureRenderBufferInfo;
@@ -58,20 +64,105 @@ export interface GeometryPassOutput
 export class GeometryRenderer
 {
     gpMaterials: GeometryPassMaterialManager;
+    gpMaterialsStereo: GeometryPassMaterialManager;
+
+    private cropFilter: CropFilterRenderer;
 
     constructor(public renderer: RendererCore)
     {
-        this.gpMaterials = new GeometryPassMaterialManager(renderer);
+        this.gpMaterials = new GeometryPassMaterialManager(renderer, false);
+        if (this.renderer.supportsMRT) {
+            this.gpMaterialsStereo = new GeometryPassMaterialManager(renderer, true);
+        }
+        this.cropFilter = new CropFilterRenderer(renderer);
     }
 
     dispose(): void
     {
         this.gpMaterials.dispose();
+        this.gpMaterialsStereo.dispose();
     }
 
     setupShadowPass(ops: RenderOperation[])
     {
 
+    }
+
+    setupMultiViewGeometryPass(width: number, height: number, numViews: number, ops: RenderOperation[]): GeometryPassOutput[]
+    {
+        const drawBuffers = <WebGLDrawBuffers> this.renderer.ext.get("WEBGL_draw_buffers");
+        const maxNumBuffers = drawBuffers ? this.renderer.gl.getParameter(drawBuffers.MAX_DRAW_BUFFERS_WEBGL) : 1;
+        const ret: GeometryPassOutput[] = [];
+
+        if (!this.renderer.useFullResolutionGBuffer ||
+            maxNumBuffers < 5 ||
+            numViews !== 2 ||
+            this.renderer.params.useInstancedStereoRendering === false) {
+            // Unsupported configuration; fall back to the naïve approach
+            for (let i = 0; i < numViews; ++i) {
+                ret.push(this.setupGeometryPass(width, height, i, ops));
+            }
+            return ret;
+        }
+
+        const rawDepth = new DepthTextureRenderBufferInfo("Raw Depth", width * 2, height,
+            TextureRenderBufferFormat.Depth);
+        const outpMerged: GeometryPassOutput = {
+            g0: new GBuffer0TextureRenderBufferInfo("G0.LR", width * 2, height,
+                this.renderer.supportsSRGB ?
+                    TextureRenderBufferFormat.SRGBA8 :
+                    TextureRenderBufferFormat.RGBA8),
+            g1: new GBuffer1TextureRenderBufferInfo("G1.LR", width * 2, height,
+                TextureRenderBufferFormat.RGBA8),
+            g2: new GBuffer2TextureRenderBufferInfo("G2.LR", width * 2, height,
+                TextureRenderBufferFormat.RGBA8),
+            g3: new GBuffer3TextureRenderBufferInfo("G3.LR", width * 2, height,
+                this.renderer.supportsSRGB ?
+                    TextureRenderBufferFormat.SRGBA8 :
+                    TextureRenderBufferFormat.RGBA8),
+            linearDepth: new LinearDepthTextureRenderBufferInfo("Depth.LR", width * 2, height,
+                TextureRenderBufferFormat.RGBA8),
+            depth: rawDepth
+        };
+        ops.push({
+            inputs: {},
+            outputs: {
+                g0: outpMerged.g0,
+                g1: outpMerged.g1,
+                g2: outpMerged.g2,
+                g3: outpMerged.g3,
+                depth: rawDepth,
+                linearDepth: outpMerged.linearDepth
+            },
+            bindings: [],
+            optionalOutputs: [],
+            name: "Geometry Pass",
+            factory: (cfg) => new GeometryPassRenderer(this, 0, true,
+                null,
+                [
+                    <TextureRenderBuffer> cfg.outputs["g0"],
+                    <TextureRenderBuffer> cfg.outputs["g1"],
+                    <TextureRenderBuffer> cfg.outputs["g2"],
+                    <TextureRenderBuffer> cfg.outputs["g3"],
+                    <TextureRenderBuffer> cfg.outputs["linearDepth"]
+                ],
+                <TextureRenderBuffer> cfg.outputs["depth"])
+        });
+
+        const {cropFilter} = this;
+        for (let i = 0; i < 2; ++i) {
+            const x = i * width, y = 0;
+            ret.push({
+                g0: cropFilter.setup(outpMerged.g0, { x, y, width, height }, ops),
+                g1: cropFilter.setup(outpMerged.g1, { x, y, width, height }, ops),
+                g2: cropFilter.setup(outpMerged.g2, { x, y, width, height }, ops),
+                g3: cropFilter.setup(outpMerged.g3, { x, y, width, height }, ops),
+                depth: outpMerged.depth,
+                linearDepth: cropFilter.setup(outpMerged.linearDepth, { x, y, width, height }, ops),
+            });
+        }
+
+        return ret;
     }
 
     setupGeometryPass(width: number, height: number, viewId: number, ops: RenderOperation[]): GeometryPassOutput
@@ -118,7 +209,7 @@ export class GeometryRenderer
                 bindings: [],
                 optionalOutputs: [],
                 name: "Geometry Pass",
-                factory: (cfg) => new GeometryPassRenderer(this, viewId,
+                factory: (cfg) => new GeometryPassRenderer(this, viewId, false,
                     null,
                     [
                         <TextureRenderBuffer> cfg.outputs["g0"],
@@ -139,7 +230,7 @@ export class GeometryRenderer
                 bindings: [],
                 optionalOutputs: [],
                 name: "Geometry Pass",
-                factory: (cfg) => new GeometryPassRenderer(this, viewId,
+                factory: (cfg) => new GeometryPassRenderer(this, viewId, false,
                     <TextureRenderBuffer> cfg.outputs["mosaic"],
                     null,
                     <TextureRenderBuffer> cfg.outputs["depth"])
@@ -191,16 +282,21 @@ class GeometryPassShader extends BaseGeometryPassShader
         super(manager, source, flags);
 
         this.geoUniforms = this.glProgram.getUniforms([
-            "u_screenVelOffset"
+            "u_screenVelOffset",
+            "u_projectionMatrix2",
+            "u_viewProjectionMatrix2",
+            "u_viewModelMatrix2",
+            "u_viewMatrix2",
+            "u_lastViewProjectionMatrix2"
         ]);
     }
 }
 
 class GeometryPassMaterialManager extends BaseGeometryPassMaterialManager
 {
-    constructor(core: RendererCore)
+    constructor(core: RendererCore, stereo: boolean)
     {
-        super(core, "VS_Geometry", core.supportsMRT ? "FS_GeometryMRT" : "FS_GeometryNoMRT");
+        super(core, stereo ? "VS_GeometryStereo" : "VS_Geometry", stereo ? "FS_GeometryMRTStereo" : core.supportsMRT ? "FS_GeometryMRT" : "FS_GeometryNoMRT");
     }
 
     createShader(material: Material, flags: number): Shader // override
@@ -216,15 +312,24 @@ class GeometryPassRenderer extends BaseGeometryPassRenderer implements RenderOpe
 
     private pointSizeMatrix: Float32Array;
 
+    secondViewState = {
+        projectionMat: new three.Matrix4(),
+        projectionViewMat: new three.Matrix4(),
+        viewMat: new three.Matrix4(),
+        frustum: new three.Frustum(),
+        lastViewProjMat: new three.Matrix4()
+    };
+
     constructor(
         private parent: GeometryRenderer,
         private viewId: number,
+        private stereo: boolean,
         private outMosaic: TextureRenderBuffer,
         private outBuffers: TextureRenderBuffer[],
         private outDepth: TextureRenderBuffer
     )
     {
-        super(parent.renderer, parent.gpMaterials, true);
+        super(parent.renderer, stereo ? parent.gpMaterialsStereo : parent.gpMaterials, true, stereo ? 2 : 1);
 
         if (outBuffers) {
             if (outBuffers[4] == null) {
@@ -252,6 +357,26 @@ class GeometryPassRenderer extends BaseGeometryPassRenderer implements RenderOpe
         const gl = this.parent.renderer.gl;
         const ctrler = this.parent.renderer.ctrler;
         gl.uniform2f(shd.geoUniforms["u_screenVelOffset"], ctrler.screenVelOffX, ctrler.screenVelOffY);
+
+        if (this.stereo) {
+            const state = this.secondViewState;
+            gl.uniformMatrix4fv(shd.geoUniforms["u_projectionMatrix2"], false,
+
+                state.projectionMat.elements);
+            gl.uniformMatrix4fv(shd.geoUniforms["u_viewProjectionMatrix2"], false,
+                state.projectionViewMat.elements);
+            gl.uniformMatrix4fv(shd.geoUniforms["u_lastViewProjectionMatrix2"], false,
+                state.lastViewProjMat.elements);
+
+            const m = Matrix4Pool.alloc();
+            m.multiplyMatrices(state.viewMat, mesh.matrixWorld);
+            gl.uniformMatrix4fv(shd.geoUniforms["u_viewModelMatrix2"], false,
+                m.elements);
+            Matrix4Pool.free(m);
+
+            gl.uniformMatrix4fv(shd.geoUniforms["u_viewMatrix2"], false,
+                state.viewMat.elements);
+        }
     }
 
     beforeRender(): void
@@ -276,8 +401,28 @@ class GeometryPassRenderer extends BaseGeometryPassRenderer implements RenderOpe
             this.parent.renderer.state.flags = GLStateFlags.DepthTestEnabled;
         }
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
+
+        // Precompute parameters for the second view
+        if (this.stereo) {
+            const state = this.secondViewState;
+            const secondCamera = this.parent.renderer.currentCamera[1];
+            const projectionMatrix = this.parent.renderer.ctrler.jitteredProjectiveMatrix[1];
+            state.viewMat.copy(secondCamera.matrixWorldInverse);
+            state.projectionMat.copy(projectionMatrix);
+            state.projectionViewMat.multiplyMatrices(
+                projectionMatrix,
+                secondCamera.matrixWorldInverse
+            );
+            state.frustum.setFromMatrix(state.projectionViewMat);
+        }
+
         this.renderGeometry(this.parent.renderer.currentCamera[this.viewId].matrixWorldInverse,
             this.parent.renderer.ctrler.jitteredProjectiveMatrix[this.viewId]);
+
+        if (this.stereo) {
+            const state = this.secondViewState;
+            state.lastViewProjMat.copy(state.projectionViewMat);
+        }
     }
     afterRender(): void
     {

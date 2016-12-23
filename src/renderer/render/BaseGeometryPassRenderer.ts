@@ -61,11 +61,13 @@ export class BaseGeometryPassRenderer
     private state: GeometryRenderState;
     private tmpMat: three.Matrix4;
     private objs: IntegerMap<BaseGeometryPassRendererObject>;
+    public viewIdBuffer: WebGLBuffer;
 
     constructor(
         public core: RendererCore,
         public materialManager: MaterialManager,
-        public needsLastWorldPosition: boolean
+        public needsLastWorldPosition: boolean,
+        public numViews = 1
     )
     {
         this.tmpMat = new three.Matrix4();
@@ -79,6 +81,16 @@ export class BaseGeometryPassRenderer
         };
 
         this.objs = new IntegerMap<BaseGeometryPassRendererObject>();
+
+        const {gl} = core;
+        this.viewIdBuffer = gl.createBuffer();
+        gl.bindBuffer(gl.ARRAY_BUFFER, this.viewIdBuffer);
+
+        const viewIdData = new Float32Array(numViews);
+        for (let i = 1; i < numViews; ++i) {
+            viewIdData[i] = i;
+        }
+        gl.bufferData(gl.ARRAY_BUFFER, viewIdData, gl.STATIC_DRAW);
     }
 
     renderGeometry(viewMatrix: three.Matrix4, projectionMatrix: three.Matrix4): void
@@ -169,6 +181,7 @@ export class BaseGeometryPassRenderer
     }
     dispose(): void
     {
+        this.core.gl.deleteBuffer(this.viewIdBuffer);
     }
 }
 
@@ -197,6 +210,8 @@ class BaseGeometryPassRendererObject
     shaderInst: ShaderInstance;
     shader: BaseGeometryPassShader;
 
+    viewIdAttr = -1;
+
     constructor(public obj: ObjectWithGeometry, public renderer: BaseGeometryPassRenderer,
         flags: BaseGeometryPassShaderFlags)
     {
@@ -217,6 +232,10 @@ class BaseGeometryPassRendererObject
 
         this.shaderInst = renderer.materialManager.get(matInst, flags);
         this.shader = <BaseGeometryPassShader> this.shaderInst.shader;
+
+        if (renderer.numViews > 1) {
+            this.viewIdAttr = renderer.core.gl.getAttribLocation(this.shader.glProgram.program, "a_viewId");
+        }
     }
 
     get isSkipped(): boolean
@@ -263,7 +282,18 @@ class BaseGeometryPassRendererObject
 
             renderer.setupAdditionalUniforms(obj, shader);
 
+            if (this.viewIdAttr >= 0) {
+                renderer.core.vertexAttribs.toggleOne(this.viewIdAttr, true);
+                gl.bindBuffer(gl.ARRAY_BUFFER, renderer.viewIdBuffer);
+                gl.vertexAttribPointer(this.viewIdAttr, 1, gl.FLOAT, false, 4, 0);
+                this.renderer.core.angleInstancedArrays.vertexAttribDivisorANGLE(this.viewIdAttr, 1);
+            }
+
             this.glDraw(geo2);
+
+            if (this.viewIdAttr >= 0) {
+                this.renderer.core.angleInstancedArrays.vertexAttribDivisorANGLE(this.viewIdAttr, 0);
+            }
         }
 
         this.save(state.nextToken);
@@ -273,12 +303,23 @@ class BaseGeometryPassRendererObject
     {
         const gl = this.renderer.core.gl;
         const index = geo.indexAttribute;
-        if (index != null) {
-            index.drawElements(gl.TRIANGLES);
+        if (this.renderer.numViews > 1) {
+            if (index != null) {
+                index.drawElementsInstanced(gl.TRIANGLES, this.renderer.numViews);
 
-            // TODO: use three.GeometryBuffer.offsets
+                // TODO: use three.GeometryBuffer.offsets
+            } else {
+                const instancedArrays = this.renderer.core.angleInstancedArrays;
+                instancedArrays.drawArraysInstancedANGLE(gl.TRIANGLES, 0, geo.numFaces * 3, this.renderer.numViews);
+            }
         } else {
-            gl.drawArrays(gl.TRIANGLES, 0, geo.numFaces * 3);
+            if (index != null) {
+                index.drawElements(gl.TRIANGLES);
+
+                // TODO: use three.GeometryBuffer.offsets
+            } else {
+                gl.drawArrays(gl.TRIANGLES, 0, geo.numFaces * 3);
+            }
         }
     }
 
@@ -349,12 +390,23 @@ class BaseGeometryPassRendererPoints extends BaseGeometryPassRendererObject
     {
         const gl = this.renderer.core.gl;
         const index = geo.indexAttribute;
-        if (index != null) {
-            index.drawElements(gl.POINTS);
+        if (this.renderer.numViews > 1) {
+            if (index != null) {
+                index.drawElementsInstanced(gl.POINTS, this.renderer.numViews);
 
-            // TODO: use three.GeometryBuffer.offsets
+                // TODO: use three.GeometryBuffer.offsets
+            } else {
+                const instancedArrays = this.renderer.core.angleInstancedArrays;
+                instancedArrays.drawArraysInstancedANGLE(gl.POINTS, 0, geo.numVertices, this.renderer.numViews);
+            }
         } else {
-            gl.drawArrays(gl.POINTS, 0, geo.numVertices);
+            if (index != null) {
+                index.drawElements(gl.POINTS);
+
+                // TODO: use three.GeometryBuffer.offsets
+            } else {
+                gl.drawArrays(gl.POINTS, 0, geo.numVertices);
+            }
         }
     }
 

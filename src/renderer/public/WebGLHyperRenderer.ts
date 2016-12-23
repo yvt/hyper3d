@@ -20,6 +20,7 @@ export interface WebGLHyperRendererCreationParameters
     useFPBuffer?: boolean;
     log?: WebGLHyperRendererLogParameters | boolean;
     useStereoRendering?: string;
+    useInstancedStereoRendering?: boolean;
 }
 
 export interface WebGLHyperRendererParameters
@@ -102,6 +103,16 @@ export class WebGLHyperRenderer implements three.Renderer
     stopProfiling(): void
     {
         this.core.stopProfiling();
+    }
+
+    profileOnce(cb: (result: WebGLHyperRendererProfilerResult) => void): void
+    {
+        this.core.startProfiling((result) => {
+            if (cb) {
+                cb(result);
+            }
+            this.core.stopProfiling();
+        });
     }
 
     get rendererName(): string

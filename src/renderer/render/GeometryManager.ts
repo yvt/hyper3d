@@ -269,6 +269,14 @@ export class GeometryAttribute
         gl.drawElements(mode, this.source.array.length, gl.UNSIGNED_SHORT, 0);
     }
 
+    drawElementsInstanced(mode: number, primcount: number): void
+    {
+        const gl = this.renderer.gl;
+        gl.bindBuffer(gl.ELEMENT_ARRAY_BUFFER, this.buffer);
+        this.renderer.angleInstancedArrays.drawElementsInstancedANGLE(mode,
+            this.source.array.length, gl.UNSIGNED_SHORT, 0, primcount);
+    }
+
     setupVertexAttrib(attribIndex: number): void
     {
         if (this.isIndex) {

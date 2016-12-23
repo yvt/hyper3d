@@ -351,7 +351,6 @@ class ShadowMapRenderServiceImpl implements RenderOperator, ShadowMapRenderServi
 
     dispose(): void
     {
-        BaseGeometryPassRenderer.prototype.dispose.call(this);
     }
 }
 

@@ -85,6 +85,7 @@ export enum HdrMode
 export class RendererCore
 {
     ext: three.WebGLExtensions;
+    angleInstancedArrays: ANGLE_instanced_arrays;
 
     supportsSRGB: boolean;
     supportsHdrTexture: boolean;
@@ -149,7 +150,7 @@ export class RendererCore
 
     log: LogManager;
 
-    constructor(public gl: WebGLRenderingContext, private params: WebGLHyperRendererCreationParameters)
+    constructor(public gl: WebGLRenderingContext, public params: WebGLHyperRendererCreationParameters)
     {
         if (params == null) {
             this.params = params = {};
@@ -188,6 +189,7 @@ export class RendererCore
         if (!this.ext.get("EXT_shader_texture_lod")) {
             throw new Error("required WebGL extension EXT_shader_texture_lod is not supported.");
         }
+        this.angleInstancedArrays = this.ext.get("ANGLE_instanced_arrays");
 
         this.supportsSRGB = !!(this.ext.get("EXT_sRGB"));
         this.supportsHdrTexture = !!(this.ext.get("OES_texture_half_float") &&
@@ -337,8 +339,10 @@ export class RendererCore
 
         const shadowMaps = this.shadowRenderer.setupShadowPass(ops);
 
+        const gbuffers = this.geometryRenderer.setupMultiViewGeometryPass(viewWidth, viewHeight, numViews, ops);
+
         for (let i = 0; i < numViews; ++i) {
-            const gbuffer = this.geometryRenderer.setupGeometryPass(viewWidth, viewHeight, i, ops);
+            const gbuffer = gbuffers[i];
             const linearDepthHalf = this.resampler.setupNearestResampler(gbuffer.linearDepth, {
                 outWidth: (gbuffer.linearDepth.width + 1) >> 1,
                 outHeight: (gbuffer.linearDepth.height + 1) >> 1
