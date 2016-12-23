@@ -66,7 +66,7 @@ export class SSAORenderer
         this.bilateral.dispose();
     }
 
-    setupFilter(input: SSAOInput, ops: RenderOperation[]): SSAOOutput
+    setupFilter(input: SSAOInput, viewId: number, ops: RenderOperation[]): SSAOOutput
     {
         const width = input.linearDepth.width;
         const height = input.linearDepth.height;
@@ -85,7 +85,7 @@ export class SSAORenderer
             bindings: [],
             optionalOutputs: [],
             name: "SSAO",
-            factory: (cfg) => new SSAORendererInstance(this,
+            factory: (cfg) => new SSAORendererInstance(this, viewId,
                 <TextureRenderBuffer> cfg.inputs["g2"],
                 <TextureRenderBuffer> cfg.inputs["linearDepth"],
                 <TextureRenderBuffer> cfg.outputs["output"])
@@ -135,6 +135,7 @@ export class SSAORendererInstance implements RenderOperator
 
     constructor(
         private parent: SSAORenderer,
+        private viewId: number,
         private inG2: TextureRenderBuffer,
         private inLinearDepth: TextureRenderBuffer,
         private out: TextureRenderBuffer
@@ -169,13 +170,13 @@ export class SSAORendererInstance implements RenderOperator
     }
     beforeRender(): void
     {
-        this.viewMat = this.parent.renderer.currentCamera.matrixWorldInverse;
+        this.viewMat = this.parent.renderer.currentCamera[this.viewId].matrixWorldInverse;
         this.projectionViewMat.multiplyMatrices(
-            this.parent.renderer.currentCamera.projectionMatrix,
-            this.parent.renderer.currentCamera.matrixWorldInverse
+            this.parent.renderer.currentCamera[this.viewId].projectionMatrix,
+            this.parent.renderer.currentCamera[this.viewId].matrixWorldInverse
         );
         this.viewVec = computeViewVectorCoefFromProjectionMatrix(
-            this.parent.renderer.currentCamera.projectionMatrix,
+            this.parent.renderer.currentCamera[this.viewId].projectionMatrix,
             this.viewVec
         );
     }

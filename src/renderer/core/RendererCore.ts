@@ -54,6 +54,7 @@ import {
     RenderPipeline,
     dumpRenderOperationAsDot
 } from "./RenderPipeline";
+import { TextureRenderBufferInfo, DummyRenderBufferInfo } from "./RenderBuffers";
 import {
     HdrMosaicTextureRenderBufferInfo,
     LogRGBTextureRenderBufferInfo,
@@ -73,6 +74,7 @@ import { validateSRGBCompliance } from "../validator/SRGBValidator";
 import { validateHalfFloatColorBuffer } from "../validator/FPColorBufferValidator";
 import { LogManager } from "../utils/Logger";
 import { Profiler } from "./Profiler";
+import { StereoCamera } from "../public/Camera";
 
 export enum HdrMode
 {
@@ -124,7 +126,7 @@ export class RendererCore
     hdrCompress: HdrCompressFilter;
 
     currentScene: three.Scene;
-    currentCamera: three.Camera;
+    currentCamera: three.Camera[];
     depthFar: number;
 
     sceneBounds: three.Box3;
@@ -151,6 +153,8 @@ export class RendererCore
     {
         if (params == null) {
             this.params = params = {};
+        } else {
+            this.params = params = Object.create(params);
         }
 
         this.log = new LogManager();
@@ -324,103 +328,120 @@ export class RendererCore
     compilePipeline(): void
     {
         const ops: RenderOperation[] = [];
-        const gbuffer = this.geometryRenderer.setupGeometryPass(this.width, this.height, ops);
-        const linearDepthHalf = this.resampler.setupNearestResampler(gbuffer.linearDepth, {
-            outWidth: (gbuffer.linearDepth.width + 1) >> 1,
-            outHeight: (gbuffer.linearDepth.height + 1) >> 1
-        }, ops);
+
+        const numViews = this.params.useStereoRendering ? 2 : 1;
+        const viewWidth = this.renderWidth;
+        const viewHeight = this.renderHeight;
+        let output: DummyRenderBufferInfo;
+        const outputs: TextureRenderBufferInfo[] = [];
 
         const shadowMaps = this.shadowRenderer.setupShadowPass(ops);
 
-        const ssao = this.ssaoRenderer.setupFilter({
-            g2: gbuffer.g2,
-            linearDepth: gbuffer.linearDepth,
-            linearDepthHalf: linearDepthHalf
-        }, ops);
-
-        const lightBuf = this.hdrMode == HdrMode.MobileHdr ?
-            this.lightRenderer.setupMobileHdrLightPass({
-                g0: gbuffer.g0,
-                g1: gbuffer.g1,
-                g2: gbuffer.g2,
-                g3: gbuffer.g3,
-                linearDepth: gbuffer.linearDepth,
-                depth: gbuffer.depth,
-                shadowMaps: shadowMaps.shadowMaps,
-                ssao: ssao.output
-            }, ops) :
-            this.lightRenderer.setupNativeHdrLightPass({
-                g0: gbuffer.g0,
-                g1: gbuffer.g1,
-                g2: gbuffer.g2,
-                g3: gbuffer.g3,
-                linearDepth: gbuffer.linearDepth,
-                depth: gbuffer.depth,
-                shadowMaps: shadowMaps.shadowMaps,
-                ssao: ssao.output
+        for (let i = 0; i < numViews; ++i) {
+            const gbuffer = this.geometryRenderer.setupGeometryPass(viewWidth, viewHeight, i, ops);
+            const linearDepthHalf = this.resampler.setupNearestResampler(gbuffer.linearDepth, {
+                outWidth: (gbuffer.linearDepth.width + 1) >> 1,
+                outHeight: (gbuffer.linearDepth.height + 1) >> 1
             }, ops);
 
-        const reflections = this.reflectionRenderer.setupReflectionPass({
-            g0: gbuffer.g0,
-            g1: gbuffer.g1,
-            g2: gbuffer.g2,
-            g3: gbuffer.g3,
-            linearDepth: gbuffer.linearDepth,
-            depth: gbuffer.depth,
-            ssao: ssao.output,
-            lit: lightBuf
-        }, ops);
+            const ssao = this.ssaoRenderer.setupFilter({
+                g2: gbuffer.g2,
+                linearDepth: gbuffer.linearDepth,
+                linearDepthHalf: linearDepthHalf
+            }, i, ops);
 
-        let demosaiced = reflections instanceof HdrMosaicTextureRenderBufferInfo ?
-            <LogRGBTextureRenderBufferInfo> this.hdrDemosaic.setupFilter(reflections, {
-                halfSized: false
-            }, ops) :
-            <LinearRGBTextureRenderBufferInfo> reflections;
+            const lightBuf = this.hdrMode == HdrMode.MobileHdr ?
+                this.lightRenderer.setupMobileHdrLightPass({
+                    g0: gbuffer.g0,
+                    g1: gbuffer.g1,
+                    g2: gbuffer.g2,
+                    g3: gbuffer.g3,
+                    linearDepth: gbuffer.linearDepth,
+                    depth: gbuffer.depth,
+                    shadowMaps: shadowMaps.shadowMaps,
+                    ssao: ssao.output
+                }, i, ops) :
+                this.lightRenderer.setupNativeHdrLightPass({
+                    g0: gbuffer.g0,
+                    g1: gbuffer.g1,
+                    g2: gbuffer.g2,
+                    g3: gbuffer.g3,
+                    linearDepth: gbuffer.linearDepth,
+                    depth: gbuffer.depth,
+                    shadowMaps: shadowMaps.shadowMaps,
+                    ssao: ssao.output
+                }, i, ops);
 
-        if (this.hdrMode == HdrMode.NativeHdr) {
-            demosaiced = this.hdrCompress.setupFilter(demosaiced,
-                HdrOperatorType.Reinhard, HdrCompressDirection.Encode,
-                1, ops);
-            demosaiced = this.temporalAA.setupFilter({
+            const reflections = this.reflectionRenderer.setupReflectionPass({
+                g0: gbuffer.g0,
+                g1: gbuffer.g1,
+                g2: gbuffer.g2,
+                g3: gbuffer.g3,
+                linearDepth: gbuffer.linearDepth,
+                depth: gbuffer.depth,
+                ssao: ssao.output,
+                lit: lightBuf
+            }, i, ops);
+
+            let demosaiced = reflections instanceof HdrMosaicTextureRenderBufferInfo ?
+                <LogRGBTextureRenderBufferInfo> this.hdrDemosaic.setupFilter(reflections, {
+                    halfSized: false
+                }, ops) :
+                <LinearRGBTextureRenderBufferInfo> reflections;
+
+            if (this.hdrMode == HdrMode.NativeHdr) {
+                demosaiced = this.hdrCompress.setupFilter(demosaiced,
+                    HdrOperatorType.Reinhard, HdrCompressDirection.Encode,
+                    1, ops);
+                demosaiced = this.temporalAA.setupFilter({
+                    color: demosaiced,
+                    linearDepth: gbuffer.linearDepth,
+                    g0: gbuffer.g0, g1: gbuffer.g1
+                }, ops);
+                demosaiced = this.hdrCompress.setupFilter(demosaiced,
+                    HdrOperatorType.Reinhard, HdrCompressDirection.Decode,
+                    1, ops);
+            }
+
+            demosaiced = this.motionBlur.setupFilter({
                 color: demosaiced,
-                linearDepth: gbuffer.linearDepth,
-                g0: gbuffer.g0, g1: gbuffer.g1
+                g0: gbuffer.g0,
+                g1: gbuffer.g1,
+                linearDepth: gbuffer.linearDepth
+            }, {
+                maxBlur: Math.max(this.renderWidth, this.renderHeight) / 40
             }, ops);
-            demosaiced = this.hdrCompress.setupFilter(demosaiced,
-                HdrOperatorType.Reinhard, HdrCompressDirection.Decode,
-                1, ops);
+
+            demosaiced = this.bloom.setupFilter(demosaiced, ops);
+
+            let toneMapped = this.toneMapFilter.setupFilter(demosaiced, i, ops);
+
+            if (this.hdrMode == HdrMode.MobileHdr) {
+                toneMapped = this.temporalAA.setupFilter({
+                    color: toneMapped,
+                    linearDepth: gbuffer.linearDepth,
+                    g0: gbuffer.g0, g1: gbuffer.g1
+                }, ops);
+            }
+
+            let visualizedBuf = toneMapped;
+            outputs.push(visualizedBuf);
         }
 
-        demosaiced = this.motionBlur.setupFilter({
-            color: demosaiced,
-            g0: gbuffer.g0,
-            g1: gbuffer.g1,
-            linearDepth: gbuffer.linearDepth
-        }, {
-            maxBlur: Math.max(this.renderWidth, this.renderHeight) / 40
-        }, ops);
-
-        demosaiced = this.bloom.setupFilter(demosaiced, ops);
-
-        let toneMapped = this.toneMapFilter.setupFilter(demosaiced, ops);
-
-        if (this.hdrMode == HdrMode.MobileHdr) {
-            toneMapped = this.temporalAA.setupFilter({
-                color: toneMapped,
-                linearDepth: gbuffer.linearDepth,
-                g0: gbuffer.g0, g1: gbuffer.g1
-            }, ops);
+        if (outputs.length === 1) {
+            let visualized = this.bufferVisualizer.setupColorVisualizer(outputs[0], ops);
+            output = visualized;
+        } else if (outputs.length === 2) {
+            let visualized = this.bufferVisualizer.setupSeparateStereoColorVisualizer(
+                outputs[0], outputs[1], ops);
+            output = visualized;
         }
 
-        const visualizedBuf = toneMapped;
-        let visualized = this.bufferVisualizer.setupColorVisualizer(visualizedBuf, ops);
-
-        // visualized = this.bufferVisualizer.setupGBufferVisualizer(gbuffer, GBufferAttributeType.Metallic, ops);
         const logger = this.log.getLogger("pipeline");
         if (logger.isEnabled)
             logger.log(dumpRenderOperationAsDot(ops));
 
-        this.renderBuffers.setup(ops, [visualized]);
+        this.renderBuffers.setup(ops, [output]);
     }
 
     startProfiling(callback: (result: WebGLHyperRendererProfilerResult) => void): void
@@ -468,7 +489,14 @@ export class RendererCore
     render(scene: three.Scene, camera: three.Camera): void
     {
         this.currentScene = scene;
-        this.currentCamera = camera;
+        if (camera instanceof StereoCamera) {
+            this.currentCamera = [camera.leftCamera, camera.rightCamera];
+        } else {
+            this.currentCamera = [camera];
+        }
+        if (this.currentCamera.length !== (this.params.useStereoRendering ? 2 : 1)) {
+            throw new Error("Bad camera type");
+        }
 
         this.uniformJitter.update();
         this.gaussianJitter.update();
@@ -483,7 +511,7 @@ export class RendererCore
 
         // compute depth far
         {
-            const proj = camera.projectionMatrix;
+            const proj = this.currentCamera[0].projectionMatrix;
             const newDepthFar = computeFarDepthFromProjectionMatrix(proj);
             if (newDepthFar != this.depthFar) {
                 this.depthFar = newDepthFar;
@@ -505,7 +533,9 @@ export class RendererCore
             }
         });
 
-        camera.matrixWorldInverse.getInverse(camera.matrixWorld);
+        for (const cam of this.currentCamera) {
+            cam.matrixWorldInverse.getInverse(cam.matrixWorld);
+        }
 
         this.profiler.beginFrame();
         this.ctrler.beforeRender();
@@ -526,6 +556,7 @@ export class RendererCore
 
         this.renderWidth = this.width = width;
         this.renderHeight = this.height = height;
+        this.renderWidth = (width / (this.params.useStereoRendering ? 2 : 1)) | 0;
 
         // global uniform values
         this.updateGlobalUniforms();
@@ -687,7 +718,8 @@ class GLState
             if (diff & GLStateFlags.ColorAttachment4Enabled) {
                 this.drawBuffers.push(this.extDrawBuffers.COLOR_ATTACHMENT4_WEBGL);
             }
-            this.extDrawBuffers.drawBuffersWEBGL(this.drawBuffers);
+            // this is actually a framebuffer state, not a context one
+            // this.extDrawBuffers.drawBuffersWEBGL(this.drawBuffers);
         }
 
         this.flags_ = newValue;

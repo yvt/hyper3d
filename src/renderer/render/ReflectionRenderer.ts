@@ -73,7 +73,7 @@ export class ReflectionRenderer
     }
 
     setupReflectionPass<T extends HdrMosaicTextureRenderBufferInfo | LinearRGBTextureRenderBufferInfo>
-    (input: ReflectionPassInput<T>, ops: RenderOperation[]): T
+    (input: ReflectionPassInput<T>, viewId: number, ops: RenderOperation[]): T
     {
         const width = input.g0.width;
         const height = input.g0.height;
@@ -124,7 +124,7 @@ export class ReflectionRenderer
             ],
             optionalOutputs: [],
             name: "IBL Pass",
-            factory: (cfg) => new ImageBasedLightRenderer(this,
+            factory: (cfg) => new ImageBasedLightRenderer(this, viewId,
                 <TextureRenderBuffer> cfg.inputs["g0"],
                 <TextureRenderBuffer> cfg.inputs["g1"],
                 <TextureRenderBuffer> cfg.inputs["g2"],
@@ -154,7 +154,7 @@ export class ReflectionRenderer
             ],
             optionalOutputs: [],
             name: "Screen-space Reflections",
-            factory: (cfg) => new SSRRenderer(this,
+            factory: (cfg) => new SSRRenderer(this, viewId,
                 <TextureRenderBuffer> cfg.inputs["g0"],
                 <TextureRenderBuffer> cfg.inputs["g1"],
                 <TextureRenderBuffer> cfg.inputs["g2"],
@@ -198,6 +198,7 @@ class ImageBasedLightRenderer implements RenderOperator
 
     constructor(
         private parent: ReflectionRenderer,
+        private viewId: number,
         private inG0: TextureRenderBuffer,
         private inG1: TextureRenderBuffer,
         private inG2: TextureRenderBuffer,
@@ -250,7 +251,7 @@ class ImageBasedLightRenderer implements RenderOperator
     }
     beforeRender(): void
     {
-        const currentCamera = this.parent.renderer.currentCamera;
+        const currentCamera = this.parent.renderer.currentCamera[this.viewId];
 
         this.viewMat = currentCamera.matrixWorldInverse;
         this.invViewMat = currentCamera.matrixWorld;
@@ -442,6 +443,7 @@ export class SSRRenderer implements RenderOperator
 
     constructor(
         private parent: ReflectionRenderer,
+        private viewId: number,
         private inG0: TextureRenderBuffer,
         private inG1: TextureRenderBuffer,
         private inG2: TextureRenderBuffer,
@@ -487,9 +489,9 @@ export class SSRRenderer implements RenderOperator
     }
     beforeRender(): void
     {
-        this.viewMat = this.parent.renderer.currentCamera.matrixWorldInverse;
+        this.viewMat = this.parent.renderer.currentCamera[this.viewId].matrixWorldInverse;
         this.viewVec = computeViewVectorCoefFromProjectionMatrix(
-            this.parent.renderer.currentCamera.projectionMatrix,
+            this.parent.renderer.currentCamera[this.viewId].projectionMatrix,
             this.viewVec
         );
     }
@@ -553,7 +555,7 @@ export class SSRRenderer implements RenderOperator
         const m1 = Matrix4Pool.alloc();
         const m2 = Matrix4Pool.alloc();
 
-        m1.makeTranslation(1, 1, 1).multiply(this.parent.renderer.currentCamera.projectionMatrix);
+        m1.makeTranslation(1, 1, 1).multiply(this.parent.renderer.currentCamera[this.viewId].projectionMatrix);
         m2.makeScale(this.inLinearDepth.width / 2, this.inLinearDepth.height / 2, 0.5).multiply(m1);
         gl.uniformMatrix4fv(p.uniforms["u_projectionMatrix"], false,
             m2.elements);

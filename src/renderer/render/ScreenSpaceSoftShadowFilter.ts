@@ -62,6 +62,7 @@ export class ScreenSpaceSoftShadowRendererInstance implements RenderOperator
 
     constructor(
         private core: RendererCore,
+        private viewId: number,
         private input: TextureRenderBuffer,
         private inLinearDepth: TextureRenderBuffer,
         private out: TextureRenderBuffer,
@@ -106,7 +107,7 @@ export class ScreenSpaceSoftShadowRendererInstance implements RenderOperator
     beforeRender(): void
     {
         this.viewVec = computeViewVectorCoefFromProjectionMatrix(
-            this.core.currentCamera.projectionMatrix, this.viewVec);
+            this.core.currentCamera[this.viewId].projectionMatrix, this.viewVec);
     }
     perform(): void
     {
@@ -162,7 +163,7 @@ export class ScreenSpaceSoftShadowRendererInstance implements RenderOperator
         if (light instanceof three.DirectionalLight) {
             const v2 = Vector4Pool.alloc();
             v2.set(light.position.x, light.position.y, light.position.z, 0);
-            v2.applyMatrix4(this.core.currentCamera.matrixWorldInverse);
+            v2.applyMatrix4(this.core.currentCamera[this.viewId].matrixWorldInverse);
             v2.normalize();
 
             const v = Vector3Pool.alloc();

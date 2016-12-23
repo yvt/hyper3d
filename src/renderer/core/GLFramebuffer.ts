@@ -45,6 +45,12 @@ export class GLFramebuffer implements IDisposable
                 gl.framebufferTexture2D(gl.FRAMEBUFFER, ext.COLOR_ATTACHMENT0_WEBGL + i,
                     texTarget, colors[i], 0);
             }
+
+            const buffers: number[] = [];
+            for (let i = 0; i < colors.length; ++i) {
+                buffers.push(ext.COLOR_ATTACHMENT0_WEBGL + i);
+            }
+            ext.drawBuffersWEBGL(buffers);
         }
 
         const status = gl.checkFramebufferStatus(gl.FRAMEBUFFER);

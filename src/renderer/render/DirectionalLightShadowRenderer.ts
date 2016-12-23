@@ -61,6 +61,7 @@ export default class DirectionalLightShadowRenderer
     }[];
 
     constructor(private core: RendererCore,
+        private viewId: number,
         public lightBuffer: TextureRenderBuffer,
         private inDepth: TextureRenderBuffer,
         private inLinearDepth: TextureRenderBuffer,
@@ -113,11 +114,11 @@ export default class DirectionalLightShadowRenderer
             }
         });
 
-        if (!(this.core.currentCamera instanceof three.PerspectiveCamera)) {
+        if (!(this.core.currentCamera[this.viewId] instanceof three.PerspectiveCamera)) {
             throw new Error("Non-perspective camera is not supported by DirectionalLightShadowRenderer.");
         }
 
-        this.viewVec = computeViewVectorCoefFromProjectionMatrix(this.core.currentCamera.projectionMatrix);
+        this.viewVec = computeViewVectorCoefFromProjectionMatrix(this.core.currentCamera[this.viewId].projectionMatrix);
     }
 
     prepare(light: PotentiallyHyperDirectionalLight): void
@@ -143,7 +144,7 @@ export default class DirectionalLightShadowRenderer
             splits.push(0);
         }
 
-        const eye = <three.PerspectiveCamera> this.core.currentCamera;
+        const eye = <three.PerspectiveCamera> this.core.currentCamera[this.viewId];
         const near = splits[0] = eye.near;
         const far = splits[splits.length - 1] = eye.far;
         const diff = (far - near) / numCascades;
@@ -238,7 +239,7 @@ export default class DirectionalLightShadowRenderer
 
         profiler.begin("Light Buffer Generation");
 
-        const eye = this.core.currentCamera;
+        const eye = this.core.currentCamera[this.viewId];
         const eyeProjMat = eye.projectionMatrix;
 
         const numCascades = light.shadowCascadeCount || 2;
@@ -339,7 +340,7 @@ export default class DirectionalLightShadowRenderer
         const tmp2 = Vector3Pool.alloc();
         const tmp3 = Vector3Pool.alloc();
 
-        const eye = this.core.currentCamera;
+        const eye = this.core.currentCamera[this.viewId];
 
         // decide axis
         const texU = tmp1;

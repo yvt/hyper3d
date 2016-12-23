@@ -74,7 +74,7 @@ export class GeometryRenderer
 
     }
 
-    setupGeometryPass(width: number, height: number, ops: RenderOperation[]): GeometryPassOutput
+    setupGeometryPass(width: number, height: number, viewId: number, ops: RenderOperation[]): GeometryPassOutput
     {
         const fullRes = this.renderer.useFullResolutionGBuffer && !this.renderer.supportsMRT;
         const mosaicked = new GBufferMosaicTextureRenderBufferInfo("Mosaicked G-Buffer",
@@ -118,7 +118,7 @@ export class GeometryRenderer
                 bindings: [],
                 optionalOutputs: [],
                 name: "Geometry Pass",
-                factory: (cfg) => new GeometryPassRenderer(this,
+                factory: (cfg) => new GeometryPassRenderer(this, viewId,
                     null,
                     [
                         <TextureRenderBuffer> cfg.outputs["g0"],
@@ -139,7 +139,7 @@ export class GeometryRenderer
                 bindings: [],
                 optionalOutputs: [],
                 name: "Geometry Pass",
-                factory: (cfg) => new GeometryPassRenderer(this,
+                factory: (cfg) => new GeometryPassRenderer(this, viewId,
                     <TextureRenderBuffer> cfg.outputs["mosaic"],
                     null,
                     <TextureRenderBuffer> cfg.outputs["depth"])
@@ -164,7 +164,7 @@ export class GeometryRenderer
                     "g0", "g1", "g2", "g3", "depth"
                 ],
                 name: "Demosaick G-Buffer",
-                factory: (cfg) => new DemosaicGBufferRenderer(this,
+                factory: (cfg) => new DemosaicGBufferRenderer(this, viewId,
                     this.renderer.supportsMRT ? null : <TextureRenderBuffer> cfg.inputs["mosaic"],
                     <TextureRenderBuffer> cfg.inputs["depth"],
                     [
@@ -218,6 +218,7 @@ class GeometryPassRenderer extends BaseGeometryPassRenderer implements RenderOpe
 
     constructor(
         private parent: GeometryRenderer,
+        private viewId: number,
         private outMosaic: TextureRenderBuffer,
         private outBuffers: TextureRenderBuffer[],
         private outDepth: TextureRenderBuffer
@@ -275,8 +276,8 @@ class GeometryPassRenderer extends BaseGeometryPassRenderer implements RenderOpe
             this.parent.renderer.state.flags = GLStateFlags.DepthTestEnabled;
         }
         gl.clear(gl.COLOR_BUFFER_BIT | gl.DEPTH_BUFFER_BIT);
-        this.renderGeometry(this.parent.renderer.currentCamera.matrixWorldInverse,
-            this.parent.renderer.ctrler.jitteredProjectiveMatrix);
+        this.renderGeometry(this.parent.renderer.currentCamera[this.viewId].matrixWorldInverse,
+            this.parent.renderer.ctrler.jitteredProjectiveMatrix[this.viewId]);
     }
     afterRender(): void
     {
@@ -302,6 +303,7 @@ class DemosaicGBufferRenderer implements RenderOperator
 
     constructor(
         private parent: GeometryRenderer,
+        private viewId: number,
         private inMosaic: TextureRenderBuffer,
         private inDepth: TextureRenderBuffer,
         private outG: TextureRenderBuffer[]
@@ -357,7 +359,7 @@ class DemosaicGBufferRenderer implements RenderOperator
 
         gl.viewport(0, 0, this.outWidth, this.outHeight);
 
-        const proj = this.parent.renderer.currentCamera.projectionMatrix;
+        const proj = this.parent.renderer.currentCamera[this.viewId].projectionMatrix;
 
         for (let i = 0; i < fbs.length; ++i) {
             const unif = uniforms[i];

@@ -89,7 +89,7 @@ export class LightRenderer
     {
     }
 
-    setupNativeHdrLightPass(input: LightPassInput, ops: RenderOperation[]): LinearRGBTextureRenderBufferInfo
+    setupNativeHdrLightPass(input: LightPassInput, viewId: number, ops: RenderOperation[]): LinearRGBTextureRenderBufferInfo
     {
         const width = input.g0.width;
         const height = input.g0.height;
@@ -147,7 +147,7 @@ export class LightRenderer
             bindings: [],
             optionalOutputs: [],
             name: "Light Pass",
-            factory: (cfg) => new LightPassRenderer(this,
+            factory: (cfg) => new LightPassRenderer(this, viewId,
                 <TextureRenderBuffer> cfg.inputs["g0"],
                 <TextureRenderBuffer> cfg.inputs["g1"],
                 <TextureRenderBuffer> cfg.inputs["g2"],
@@ -165,7 +165,7 @@ export class LightRenderer
         return outp;
     }
 
-    setupMobileHdrLightPass(input: LightPassInput, ops: RenderOperation[]): HdrMosaicTextureRenderBufferInfo
+    setupMobileHdrLightPass(input: LightPassInput, viewId: number, ops: RenderOperation[]): HdrMosaicTextureRenderBufferInfo
     {
         const width = input.g0.width;
         const height = input.g0.height;
@@ -227,7 +227,7 @@ export class LightRenderer
             bindings: [],
             optionalOutputs: [],
             name: "Light Pass",
-            factory: (cfg) => new LightPassRenderer(this,
+            factory: (cfg) => new LightPassRenderer(this, viewId,
                 <TextureRenderBuffer> cfg.inputs["g0"],
                 <TextureRenderBuffer> cfg.inputs["g1"],
                 <TextureRenderBuffer> cfg.inputs["g2"],
@@ -379,6 +379,7 @@ class LightPassRenderer implements RenderOperator
 
     constructor(
         private parent: LightRenderer,
+        private viewId: number,
         private inG0: TextureRenderBuffer,
         private inG1: TextureRenderBuffer,
         private inG2: TextureRenderBuffer,
@@ -416,16 +417,16 @@ class LightPassRenderer implements RenderOperator
         }
 
         this.directionalLightShadowRenderer = new DirectionalLightShadowRenderer(
-            parent.renderer, tmpLight,
+            parent.renderer, viewId, tmpLight,
             inDepth, inLinearDepth, inShadowMaps
         );
 
         this.ssssRenderer1 = new ScreenSpaceSoftShadowRendererInstance(
-            parent.renderer, tmpLight, inLinearDepth,
+            parent.renderer, viewId, tmpLight, inLinearDepth,
             tmpLight2, ScreenSpaceSoftShadowDirection.Horitonzal
         );
         this.ssssRenderer2 = new ScreenSpaceSoftShadowRendererInstance(
-            parent.renderer, tmpLight2, inLinearDepth,
+            parent.renderer, viewId, tmpLight2, inLinearDepth,
             tmpLight, ScreenSpaceSoftShadowDirection.Vertical
         );
 
@@ -496,7 +497,7 @@ class LightPassRenderer implements RenderOperator
     beforeRender(): void
     {
         const scene = this.parent.renderer.currentScene;
-        const currentCamera = this.parent.renderer.currentCamera;
+        const currentCamera = this.parent.renderer.currentCamera[this.viewId];
 
         this.viewMat = currentCamera.matrixWorldInverse;
         this.projectionViewMat.multiplyMatrices(
@@ -791,7 +792,7 @@ class LightPassRenderer implements RenderOperator
             const dir = light.position;
             const dir3 = Vector4Pool.alloc().set(dir.x, dir.y, dir.z, 0);
             dir3.set(dir.x, dir.y, dir.z, 0.);
-            dir3.applyMatrix4(this.parent.renderer.currentCamera.matrixWorldInverse);
+            dir3.applyMatrix4(this.parent.renderer.currentCamera[this.viewId].matrixWorldInverse);
             dir3.normalize();
             gl.uniform3f(p.uniforms["u_lightDir"], dir3.x, dir3.y, dir3.z);
             Vector4Pool.free(dir3);
@@ -884,7 +885,7 @@ class LightPassRenderer implements RenderOperator
                 const m3 = Matrix4Pool.alloc();
 
                 m2.getInverse(shadowCamera.matrixWorld);
-                m1.multiplyMatrices(m2, this.parent.renderer.currentCamera.matrixWorld);
+                m1.multiplyMatrices(m2, this.parent.renderer.currentCamera[this.viewId].matrixWorld);
                 m3.makeScale(scl, scl, scl).multiply(m1);
                 gl.uniformMatrix4fv(p.uniforms["u_shadowMapMatrix"], false, m3.elements);
 

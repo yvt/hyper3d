@@ -17,7 +17,7 @@ export class RenderingController
 
     private jitGen: CenteredNoise;
 
-    jitteredProjectiveMatrix: three.Matrix4;
+    jitteredProjectiveMatrix: three.Matrix4[];
 
     constructor(private core: RendererCore)
     {
@@ -26,23 +26,33 @@ export class RenderingController
 
         this.jitGen = new CenteredNoise();
 
-        this.jitteredProjectiveMatrix = new three.Matrix4();
+        this.jitteredProjectiveMatrix = [];
     }
 
     beforeRender(): void
     {
         // jitter projection matrix for temporal AA
-        const projMat = this.jitteredProjectiveMatrix;
-        projMat.copy(this.core.currentCamera.projectionMatrix);
+        const projMats = this.jitteredProjectiveMatrix;
+        const cameras = this.core.currentCamera;
+        while (projMats.length < cameras.length) {
+            projMats.push(new three.Matrix4());
+        }
 
         const jitScale = (this.core.useWiderTemporalAA ? 2 : 1) * 1.5;
         const jit = this.jitGen.sample();
         const jitX = jit.x / this.core.renderWidth * jitScale;
         const jitY = jit.y / this.core.renderHeight * jitScale;
-        for (let i = 0; i < 4; ++i) {
-            projMat.elements[(i << 2)] += projMat.elements[(i << 2) + 3] * jitX;
-            projMat.elements[(i << 2) + 1] += projMat.elements[(i << 2) + 3] * jitY;
+
+        for (let i = 0; i < cameras.length; ++i) {
+            const projMat = projMats[i];
+
+            projMat.copy(cameras[i].projectionMatrix);
+            for (let i = 0; i < 4; ++i) {
+                projMat.elements[(i << 2)] += projMat.elements[(i << 2) + 3] * jitX;
+                projMat.elements[(i << 2) + 1] += projMat.elements[(i << 2) + 3] * jitY;
+            }
         }
+
         this.screenVelOffX = this.lastJitX - jitX;
         this.screenVelOffY = this.lastJitY - jitY;
         this.lastJitX = jitX;

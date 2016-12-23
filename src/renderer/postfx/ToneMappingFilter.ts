@@ -74,7 +74,7 @@ export class ToneMappingFilterRenderer
     }
 
     /** input must be LogRGB. */
-    setupFilter(input: LogRGBTextureRenderBufferInfo | LinearRGBTextureRenderBufferInfo, ops: RenderOperation[]): LinearRGBTextureRenderBufferInfo
+    setupFilter(input: LogRGBTextureRenderBufferInfo | LinearRGBTextureRenderBufferInfo, viewId: number, ops: RenderOperation[]): LinearRGBTextureRenderBufferInfo
     {
         let width = input.width;
         let height = input.height;
@@ -93,7 +93,7 @@ export class ToneMappingFilterRenderer
             bindings: [],
             optionalOutputs: [],
             name: `Tone Mapping`,
-            factory: (cfg) => new ToneMappingFilterRendererInstance(this,
+            factory: (cfg) => new ToneMappingFilterRendererInstance(this, viewId,
                 <TextureRenderBuffer> cfg.inputs["input"],
                 <TextureRenderBuffer> cfg.outputs["output"],
                 input instanceof LogRGBTextureRenderBufferInfo)
@@ -116,6 +116,7 @@ class ToneMappingFilterRendererInstance implements RenderOperator
 
     constructor(
         private parent: ToneMappingFilterRenderer,
+        private viewId: number,
         private input: TextureRenderBuffer,
         private out: TextureRenderBuffer,
         inputIsLogRGB: boolean
@@ -177,7 +178,7 @@ class ToneMappingFilterRendererInstance implements RenderOperator
         const params = this.parent.params;
 
         this.viewVecs =
-            computeViewVectorCoefFromProjectionMatrix(this.parent.renderer.currentCamera.projectionMatrix,
+            computeViewVectorCoefFromProjectionMatrix(this.parent.renderer.currentCamera[this.viewId].projectionMatrix,
             this.viewVecs);
         gl.uniform1f(p.uniforms["u_vignetteAmount"], params.vignette);
         gl.uniform2f(p.uniforms["u_vignetteScale"], this.viewVecs.coefX.length(), this.viewVecs.coefY.length());
